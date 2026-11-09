@@ -11,6 +11,7 @@ Spec forms:
   name:aws/Service  -> official AWS icon     (e.g. lambda:aws/AWS-Lambda)
   name:gcp/Product  -> official Google Cloud icon (e.g. run:gcp/Cloud-Run)
   name:azure/Service -> official Azure icon  (e.g. vault:azure/Key-Vaults)
+  name:databricks/Product -> Databricks product icon (e.g. uc:databricks/unity-catalog)
 
 Sources tried in order:
   1. svgl              api.svgl.app?search={s} -> route (light variant when split)
@@ -28,6 +29,11 @@ gcp/ specs and the slugs gcp-* and google-cloud-* do the same with Google's pack
 
 azure/ specs and the slugs azure, microsoft-azure and azure-* do the same with Microsoft's package
 (learn.microsoft.com/azure/architecture/icons).
+
+databricks/ specs and the slugs databricks-* read a community catalog that maps each product to an
+unmodified SVG from databricks.com (github.com/oieduardorabelo/databricks-architecture-icons, MIT),
+pinned to one commit. Databricks publishes no icon package. The bare slug databricks is the
+Databricks mark, through the chain.
 
 svgl is matched by normalized title equality (search is fuzzy — a loose match would
 silently ship the wrong brand's logo, so non-exact hits fall through to next source).
@@ -144,6 +150,9 @@ AZURE_ALIASES = {
     "datafactory": "Data-Factories", "synapse": "Azure-Synapse-Analytics", "resourcegroup": "Resource-Groups",
     "rg": "Resource-Groups", "managedidentity": "Managed-Identities",
 }
+# Databricks has no icon package; this community catalog maps products to unmodified databricks.com files
+DATABRICKS_ICONS = ("https://raw.githubusercontent.com/oieduardorabelo/databricks-architecture-icons/"
+                    "5a8e0da62193ad374e860c9887d17a266e003131/")
 PACKAGES = {}
 
 def get(url, timeout=15):
@@ -301,6 +310,35 @@ def azure_sources(query):
     print(f"Azure {query!r} is not a name in the package. Names: {', '.join(sorted(v[0] for v in index.values()))}")
     return []
 
+@functools.lru_cache(maxsize=1)
+def databricks_index():
+    """The catalog as {normalized name: (slug, url)}, keyed by slug, name and former names."""
+    catalog = json.loads(get(DATABRICKS_ICONS + "icons/catalog.json"))
+    index = {}
+    for p in catalog["products"]:
+        # aka reads like "formerly Databricks Vector Search / Mosaic AI Vector Search"
+        aka = re.split(r"[./()]|\bformerly\b", p.get("aka") or "", flags=re.IGNORECASE)
+        for n in [p["slug"], p["name"], *aka]:
+            if n.strip():
+                index.setdefault(norm(n), (p["slug"], DATABRICKS_ICONS + p["source"]))
+    return index
+
+def databricks_sources(query):
+    """Exact match on a product's slug, name or former name, with the Databricks / Mosaic AI prefix
+    optional. A miss lists every slug, as for AWS."""
+    try:
+        index = databricks_index()
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
+        print(f"Databricks icon catalog unavailable: {e}")
+        return []
+    short = lambda s: re.sub(r"^(databricks|mosaicai)", "", s)
+    q = norm(query)
+    hit = index.get(q) or next((v for k, v in index.items() if short(k) == short(q)), None)
+    if hit:
+        return [("databricks", hit[1], None)]
+    print(f"Databricks {query!r} is not a product name. Slugs: {', '.join(sorted({v[0] for v in index.values()}))}")
+    return []
+
 def sources(slug):
     # concept icons: slug "lucide/<icon-name>" -> Lucide line icon (browse: lucide.dev/icons)
     if slug.startswith("lucide/"):
@@ -316,6 +354,9 @@ def sources(slug):
     azure = re.fullmatch(r"azure[/-](.+)", slug, re.IGNORECASE)
     if azure:
         return azure_sources(azure.group(1))
+    databricks = re.fullmatch(r"databricks[/-](.+)", slug, re.IGNORECASE)
+    if databricks:
+        return databricks_sources(databricks.group(1))
     if norm(slug) in ("gcp", "googlecloudplatform"):
         slug = "google-cloud"
     gcp = re.fullmatch(r"(?:gcp/|gcp-|google-cloud-)(.+)", slug, re.IGNORECASE)
