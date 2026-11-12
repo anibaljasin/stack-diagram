@@ -150,7 +150,8 @@ AZURE_ALIASES = {
     "datafactory": "Data-Factories", "synapse": "Azure-Synapse-Analytics", "resourcegroup": "Resource-Groups",
     "rg": "Resource-Groups", "managedidentity": "Managed-Identities",
 }
-# Databricks has no icon package; this community catalog maps products to unmodified databricks.com files
+# Databricks has no icon package; this community catalog maps products to their databricks.com files.
+# Icons download from databricks.com, with the catalog's pinned copy as fallback if a file moves.
 DATABRICKS_ICONS = ("https://raw.githubusercontent.com/oieduardorabelo/databricks-architecture-icons/"
                     "5a8e0da62193ad374e860c9887d17a266e003131/")
 PACKAGES = {}
@@ -312,15 +313,17 @@ def azure_sources(query):
 
 @functools.lru_cache(maxsize=1)
 def databricks_index():
-    """The catalog as {normalized name: (slug, url)}, keyed by slug, name and former names."""
+    """The catalog as {normalized name: (slug, databricks.com url, pinned copy)}, keyed by slug, name
+    and former names."""
     catalog = json.loads(get(DATABRICKS_ICONS + "icons/catalog.json"))
     index = {}
     for p in catalog["products"]:
-        # aka reads like "formerly Databricks Vector Search / Mosaic AI Vector Search"
-        aka = re.split(r"[./()]|\bformerly\b", p.get("aka") or "", flags=re.IGNORECASE)
+        # aka reads like "formerly Databricks Vector Search / Mosaic AI Vector Search"; a bare slash
+        # stays, so "AI/BI Genie spaces" does not yield the name "AI"
+        aka = re.split(r"\s/\s|[.()]|\bformerly\b", p.get("aka") or "", flags=re.IGNORECASE)
         for n in [p["slug"], p["name"], *aka]:
             if n.strip():
-                index.setdefault(norm(n), (p["slug"], DATABRICKS_ICONS + p["source"]))
+                index.setdefault(norm(n), (p["slug"], p.get("sourceUrl"), DATABRICKS_ICONS + p["source"]))
     return index
 
 def databricks_sources(query):
@@ -333,9 +336,10 @@ def databricks_sources(query):
         return []
     short = lambda s: re.sub(r"^(databricks|mosaicai)", "", s)
     q = norm(query)
-    hit = index.get(q) or next((v for k, v in index.items() if short(k) == short(q)), None)
+    # a bare prefix ("mosaic-ai") strips to nothing and must not match the Databricks logo
+    hit = index.get(q) or (short(q) and next((v for k, v in index.items() if short(k) == short(q)), None))
     if hit:
-        return [("databricks", hit[1], None)]
+        return [("databricks", url, None) for url in hit[1:] if url]
     print(f"Databricks {query!r} is not a product name. Slugs: {', '.join(sorted({v[0] for v in index.values()}))}")
     return []
 
